@@ -1,0 +1,35 @@
+{
+  "users": [],
+  "admins": [],
+  "categories": [
+    "برمجة",
+    "تصميم"
+  ],
+  "courses": [
+    {
+      "id": 1,
+      "name": "مقدمة في بايثون",
+      "description": "دورة أساسيات لغة بايثون.",
+      "price": 100,
+      "category": "برمجة",
+      "active": true
+    },
+    {
+      "id": 2,
+      "name": "فوتوشوب للمبتدئين",
+      "description": "تعلم أساسيات التصميم ببرنامج فوتوشوب.",
+      "price": 150,
+      "category": "تصميم",
+      "active": true
+    },
+    {
+      "id": 3,
+      "name": "جافا سكريبت متقدم",
+      "description": "دورة متعمقة في لغة جافا سكريبت.",
+      "price": 200,
+      "category": "برمجة",
+      "active": false
+    }
+  ],
+  "registrations": []
+}

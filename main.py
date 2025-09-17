@@ -1,18 +1,9 @@
 import os
 import logging
 import json
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
-from flask import Flask
-from threading import Thread
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ConversationHandler,
-    ContextTypes,
-    filters,
-)
+from flask import Flask, request
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
 # إعداد logging لتتبع الأخطاء
 logging.basicConfig(
@@ -20,27 +11,35 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# تعيين رمز البوت الخاص بك (Bot Token) هنا
+# توكن البوت
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# إنشاء تطبيق Flask
-app = Flask('')
 
-# دالة الـ route الرئيسية
-@app.route('/')
+# إنشاء البوت و Application
+application = Application.builder().token(BOT_TOKEN).build()
+dispatcher = application.dispatcher  # Dispatcher للبوت
+
+# إنشاء تطبيق Flask
+app = Flask(__name__)
+
+# Route لاستقبال تحديثات Webhook
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), Bot(token=BOT_TOKEN))
+    dispatcher.process_update(update)
+    return "OK"
+
+# Route أساسي لتأكيد أن السيرفر شغال
+@app.route("/")
 def home():
     return "Bot is running"
 
-# دالة لتشغيل Flask في Thread منفصل
-def run():
-    app.run(host='0.0.0.0', port=8080)
+if __name__ == "__main__":
+    # ضبط Webhook على Telegram
+    WEBHOOK_URL = f"https://beyoum-1.onrender.com/{BOT_TOKEN}"  # رابط مشروعك على Render
+    Bot(token=BOT_TOKEN).set_webhook(url=WEBHOOK_URL)
+    # تشغيل Flask
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
-# دالة لتشغيل Flask
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-application = Application.builder().token(BOT_TOKEN).build()
-application.run_polling()
 # إضافة ID المطور الرئيسي هنا
 DEV_ID = 873158772
 
@@ -76,9 +75,9 @@ DB_FILE = "db.json"
     DELETE_CATEGORY_CONFIRM,
     DELETE_COURSE_CONFIRM,
     EDIT_COURSE_CAT,
-    MOVE_COURSE_SELECT_COURSE, # حالة جديدة لنقل الدورة
-    MOVE_COURSE_SELECT_CAT, # حالة جديدة لاختيار التصنيف الجديد
-) = range(7, 25) # تم تعديل مدى الأرقام ليشمل الحالات الجديدة
+    MOVE_COURSE_SELECT_COURSE,  # حالة جديدة لنقل الدورة
+    MOVE_COURSE_SELECT_CAT,     # حالة جديدة لاختيار التصنيف الجديد
+) = range(7, 25)  # تم تعديل مدى الأرقام ليشمل الحالات الجديدة
 
 # دالة لقراءة البيانات من ملف JSON
 def load_db():
@@ -1135,6 +1134,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

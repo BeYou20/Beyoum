@@ -18,7 +18,7 @@ logging.basicConfig(
 )
 
 # تعيين رمز البوت الخاص بك (Bot Token) هنا
-BOT_TOKEN = "7342568984:AAGmOCkNc7SljYdwLuKdRjxRctRZZccsSck"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # إضافة ID المطور الرئيسي هنا
 DEV_ID = 873158772
@@ -1114,4 +1114,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 

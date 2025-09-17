@@ -2,8 +2,9 @@ import os
 import logging
 import json
 from flask import Flask, request
-from telegram import Update, Bot
+from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
+from telegram.error import Unauthorized, BadRequest
 
 # إعداد logging لتتبع الأخطاء
 logging.basicConfig(
@@ -14,9 +15,37 @@ logging.basicConfig(
 # توكن البوت
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+# يمكنك استخدام مكتبة مثل python-telegram-bot لتنظيم مشروعك
+# بدلاً من وضع كل شيء في ملف واحد. يمكن تقسيم الكود إلى ملفات
+# كما يلي:
+#
+# 1. main.py: يحتوي على دالة main() وتكوين الـ Application و Handlers.
+# 2. handlers.py: يحتوي على جميع دوال معالجة الأوامر والمحادثات.
+# 3. db_manager.py: يحتوي على دوال التعامل مع قاعدة البيانات.
+#
+# مثال على مدير قاعدة بيانات حقيقي بدلاً من JSON
+#
+# import sqlite3
+#
+# def init_db():
+#     conn = sqlite3.connect('db.sqlite')
+#     cursor = conn.cursor()
+#     cursor.execute(...) # إنشاء جداول المستخدمين، الدورات، إلخ
+#     conn.commit()
+#     conn.close()
+#
+# def get_user(user_id):
+#     conn = sqlite3.connect('db.sqlite')
+#     cursor = conn.cursor()
+#     cursor.execute("SELECT * FROM users WHERE id=?", (user_id,))
+#     user = cursor.fetchone()
+#     conn.close()
+#     return user
+#
+# ...الخ
+
 # إنشاء البوت و Application
 application = Application.builder().token(BOT_TOKEN).build()
-dispatcher = application.dispatcher  # Dispatcher للبوت
 
 # إنشاء تطبيق Flask
 app = Flask(__name__)
@@ -24,21 +53,16 @@ app = Flask(__name__)
 # Route لاستقبال تحديثات Webhook
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), Bot(token=BOT_TOKEN))
-    dispatcher.process_update(update)
+    # هذا الجزء ضروري لتلقي التحديثات من Telegram عند نشر البوت
+    # يجب أن يكون هذا الـ endpoint هو الـ URL الذي تم إعداده في Telegram
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.process_update(update)
     return "OK"
 
 # Route أساسي لتأكيد أن السيرفر شغال
 @app.route("/")
 def home():
     return "Bot is running"
-
-if __name__ == "__main__":
-    # ضبط Webhook على Telegram
-    WEBHOOK_URL = f"https://beyoum-1.onrender.com/{BOT_TOKEN}"  # رابط مشروعك على Render
-    Bot(token=BOT_TOKEN).set_webhook(url=WEBHOOK_URL)
-    # تشغيل Flask
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
 # إضافة ID المطور الرئيسي هنا
 DEV_ID = 873158772
@@ -75,9 +99,9 @@ DB_FILE = "db.json"
     DELETE_CATEGORY_CONFIRM,
     DELETE_COURSE_CONFIRM,
     EDIT_COURSE_CAT,
-    MOVE_COURSE_SELECT_COURSE,  # حالة جديدة لنقل الدورة
-    MOVE_COURSE_SELECT_CAT,     # حالة جديدة لاختيار التصنيف الجديد
-) = range(7, 25)  # تم تعديل مدى الأرقام ليشمل الحالات الجديدة
+    MOVE_COURSE_SELECT_COURSE,
+    MOVE_COURSE_SELECT_CAT,
+) = range(7, 25)
 
 # دالة لقراءة البيانات من ملف JSON
 def load_db():
@@ -85,17 +109,17 @@ def load_db():
         with open(DB_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        # إنشاء بنية فارغة إذا لم يكن الملف موجودًا
         data = {
-            "users": [873158772],
-            "admins": [873158772],
+            "users": [],
+            "admins": [DEV_ID],
             "categories": [],
             "courses": [],
             "registrations": []
         }
     
-    # ضمان وجود الـ DEV_ID دائمًا في قائمة المديرين
-    if DEV_ID not in data["admins"]:
+    if DEV_ID not in data.get("admins", []):
+        if "admins" not in data:
+            data["admins"] = []
         data["admins"].append(DEV_ID)
         save_db(data)
         
@@ -125,20 +149,17 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         await update.message.reply_text("اختر من القائمة الرئيسية:", reply_markup=reply_markup)
 
-
 # دالة أمر /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     user_id = user.id
     db = load_db()
     
-    # إرسال إشعار للمدير عند دخول مستخدم جديد
     is_new_user = user_id not in db["users"]
     if is_new_user:
         db["users"].append(user_id)
         save_db(db)
         
-        # لا ترسل إشعار الدخول إلى المستخدم نفسه إذا كان مديرًا
         admin_ids_to_notify = [admin_id for admin_id in db["admins"] if admin_id != user_id]
         if admin_ids_to_notify:
             message_to_admin = (
@@ -154,7 +175,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     parse_mode='Markdown'
                 )
     
-    await update.message.reply_text("أهلاً بك في بوت الدورات التدريبية!")
+    await update.message.reply_text("أهلاً بك في بوت الدورات التدريبية!", reply_markup=ReplyKeyboardRemove())
     await show_main_menu(update, context)
 
 # دالة لعرض التصنيفات
@@ -189,7 +210,7 @@ async def show_courses(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     category_name = query.data.split("_")[1]
     db = load_db()
     
-    courses_in_category = [c for c in db["courses"] if c["category"] == category_name and c["active"]]
+    courses_in_category = [c for c in db["courses"] if c["category"] == category_name and c.get("active", True)]
     
     if not courses_in_category:
         await query.edit_message_text(
@@ -231,11 +252,11 @@ async def show_course_details(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"**{course['name']}**\n\n"
         f"**الوصف:** {course['description']}\n"
         f"**السعر:** {course['price']} ريال يمني\n"
-        f"**الحالة:** {'✅ متاحة للتسجيل' if course['active'] else '❌ غير متاحة حالياً'}"
+        f"**الحالة:** {'✅ متاحة للتسجيل' if course.get('active', True) else '❌ غير متاحة حالياً'}"
     )
     
     keyboard = []
-    if course["active"]:
+    if course.get("active", True):
         keyboard.append([InlineKeyboardButton("📥 التسجيل في الدورة", callback_data=f"register_{course_id}")])
     
     keyboard.append([InlineKeyboardButton("⬅️ رجوع", callback_data=f"cat_{course['category']}")])
@@ -361,15 +382,17 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                            InlineKeyboardButton("❌ رفض", callback_data=f"reject_{registration_data['user_id']}_{registration_data['course_id']}")]]
         
         for admin_id in admin_ids:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=message_to_admin,
-                reply_markup=InlineKeyboardMarkup(admin_keyboard),
-                parse_mode='Markdown'
-            )
-        
-    return ConversationHandler.END
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=message_to_admin,
+                    reply_markup=InlineKeyboardMarkup(admin_keyboard),
+                    parse_mode='Markdown'
+                )
+            except (Unauthorized, BadRequest):
+                logging.warning(f"Failed to send registration notification to admin {admin_id}. User may have blocked the bot.")
 
+    return ConversationHandler.END
 
 # دالة لعرض لوحة المدير
 async def show_dev_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -452,12 +475,14 @@ async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             save_db(db)
             await update.message.reply_text(f"تم إضافة المستخدم {new_admin_id} كمشرف بنجاح.", reply_markup=ReplyKeyboardRemove())
             
-            # إرسال إشعار للمستخدم الجديد أنه أصبح مشرفاً
-            await context.bot.send_message(
-                chat_id=new_admin_id,
-                text="✅ تهانينا! لقد تم إضافتك كمدير في البوت."
-            )
-            
+            try:
+                await context.bot.send_message(
+                    chat_id=new_admin_id,
+                    text="✅ تهانينا! لقد تم إضافتك كمدير في البوت."
+                )
+            except (Unauthorized, BadRequest):
+                logging.warning(f"Failed to notify user {new_admin_id} about admin promotion.")
+
     except ValueError:
         await update.message.reply_text("الرجاء إرسال رقم صحيح.")
     return ConversationHandler.END
@@ -467,7 +492,6 @@ async def remove_admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     db = load_db()
-    # لا يمكن إزالة المطور الأساسي
     admins_to_remove = [admin for admin in db["admins"] if admin != DEV_ID]
     if not admins_to_remove:
         await query.edit_message_text("لا يوجد مشرفون لإزالتهم.")
@@ -497,11 +521,13 @@ async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("الرجاء إرسال الرسالة التي تريد إرسالها لجميع المستخدمين:")
+    await query.edit_message_text("الرجاء إرسال الرسالة (نص أو صورة) التي تريد إرسالها لجميع المستخدمين:")
     return GET_BROADCAST_MESSAGE
 
 async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    message_text = update.message.text
+    message_text = update.message.caption if update.message.photo else update.message.text
+    media_file_id = update.message.photo[-1].file_id if update.message.photo else None
+    
     db = load_db()
     users = db["users"]
     
@@ -510,14 +536,45 @@ async def send_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     for user_id in users:
         try:
-            await context.bot.send_message(chat_id=user_id, text=message_text)
+            if media_file_id:
+                await context.bot.send_photo(chat_id=user_id, photo=media_file_id, caption=message_text)
+            else:
+                await context.bot.send_message(chat_id=user_id, text=message_text)
             success_count += 1
-        except Exception:
+        except Unauthorized:
+            logging.info(f"Broadcast failed for user {user_id}: User blocked the bot.")
+            fail_count += 1
+        except BadRequest as e:
+            logging.error(f"Broadcast failed for user {user_id}: {e}")
+            fail_count += 1
+        except Exception as e:
+            logging.error(f"An unexpected error occurred for user {user_id}: {e}")
             fail_count += 1
 
     await update.message.reply_text(f"تم إرسال الرسالة بنجاح إلى {success_count} مستخدم.\nفشل الإرسال إلى {fail_count} مستخدم.", reply_markup=ReplyKeyboardRemove())
+    await show_dev_panel_after_conv(update, context)
     return ConversationHandler.END
 
+async def show_dev_panel_after_conv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db = load_db()
+    user_id = update.effective_user.id
+    if user_id in db["admins"]:
+        keyboard = [
+            [InlineKeyboardButton("📊 إحصائيات", callback_data="dev_stats")],
+            [InlineKeyboardButton("👤 إدارة المستخدمين", callback_data="dev_users")],
+            [InlineKeyboardButton("📚 إدارة الدورات", callback_data="dev_courses")],
+            [InlineKeyboardButton("🗂️ إدارة التصنيفات", callback_data="dev_categories")],
+            [InlineKeyboardButton("📢 إرسال رسالة جماعية", callback_data="dev_broadcast")],
+            [InlineKeyboardButton("⬅️ رجوع", callback_data="main_menu")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="تمت العملية بنجاح. عدت إلى لوحة المطور. اختر من القائمة:",
+            reply_markup=reply_markup
+        )
+    else:
+        await show_main_menu(update, context)
 
 # دوال إدارة الدورات
 async def show_manage_courses_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -528,14 +585,14 @@ async def show_manage_courses_menu(update: Update, context: ContextTypes.DEFAULT
     courses_list = ""
     if db["courses"]:
         for c in db["courses"]:
-            courses_list += f"- {'✅' if c['active'] else '❌'} {c['name']} (ID: {c['id']})\n"
+            courses_list += f"- {'✅' if c.get('active', True) else '❌'} {c['name']} (ID: {c['id']})\n"
     else:
         courses_list = "لا توجد دورات حالياً."
         
     keyboard = [
         [InlineKeyboardButton("➕ إضافة دورة جديدة", callback_data="dev_add_course")],
         [InlineKeyboardButton("✏️ تعديل دورة", callback_data="dev_edit_course")],
-        [InlineKeyboardButton("➡️ نقل دورة", callback_data="dev_move_course")], # زر جديد لنقل الدورة
+        [InlineKeyboardButton("➡️ نقل دورة", callback_data="dev_move_course")],
         [InlineKeyboardButton("🗑️ حذف دورة", callback_data="dev_delete_course")],
         [InlineKeyboardButton("⬅️ رجوع", callback_data="dev_panel")]
     ]
@@ -697,6 +754,7 @@ async def update_course_with_new_value(update: Update, context: ContextTypes.DEF
             
     save_db(db)
     await update.message.reply_text(f"✅ تم تعديل الدورة بنجاح.", reply_markup=ReplyKeyboardRemove())
+    await show_dev_panel_after_conv(update, context)
     return ConversationHandler.END
 
 async def update_course_with_new_cat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -724,7 +782,7 @@ async def toggle_course_status(update: Update, context: ContextTypes.DEFAULT_TYP
     db = load_db()
     for c in db["courses"]:
         if c["id"] == course_id:
-            c["active"] = not c["active"]
+            c["active"] = not c.get("active", True)
             break
     save_db(db)
     await query.edit_message_text("✅ تم تغيير حالة الدورة بنجاح.")
@@ -819,6 +877,7 @@ async def add_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         save_db(db)
         await update.message.reply_text("✅ تم إضافة التصنيف بنجاح.", reply_markup=ReplyKeyboardRemove())
     
+    await show_dev_panel_after_conv(update, context)
     return ConversationHandler.END
 
 
@@ -898,13 +957,18 @@ async def send_accept_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             reg["status"] = "accepted"
             break
     save_db(db)
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=f"✅ تهانينا! تم قبول طلب تسجيلك في الدورة.\n\n"
-             f"{accept_message}\n\n"
-             f"الآن، الرجاء إرسال إيصال الدفع هنا."
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"✅ تهانينا! تم قبول طلب تسجيلك في الدورة.\n\n"
+                 f"{accept_message}\n\n"
+                 f"الآن، الرجاء إرسال إيصال الدفع هنا."
+        )
+    except (Unauthorized, BadRequest):
+        logging.warning(f"Failed to send acceptance message to user {user_id}. User may have blocked the bot.")
+
     await update.message.reply_text("تم إرسال رسالة القبول للمستخدم بنجاح.", reply_markup=ReplyKeyboardRemove())
+    await show_dev_panel_after_conv(update, context)
     return ConversationHandler.END
 
 
@@ -932,12 +996,17 @@ async def send_reject_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             reg["status"] = "rejected"
             break
     save_db(db)
-    await context.bot.send_message(
-        chat_id=user_id,
-        text=f"❌ للأسف، تم رفض طلب تسجيلك.\n\n"
-             f"{reject_message}"
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"❌ للأسف، تم رفض طلب تسجيلك.\n\n"
+                 f"{reject_message}"
+        )
+    except (Unauthorized, BadRequest):
+        logging.warning(f"Failed to send rejection message to user {user_id}. User may have blocked the bot.")
+
     await update.message.reply_text("تم إرسال رسالة الرفض للمستخدم بنجاح.", reply_markup=ReplyKeyboardRemove())
+    await show_dev_panel_after_conv(update, context)
     return ConversationHandler.END
 
 
@@ -945,7 +1014,7 @@ async def send_reject_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     db = load_db()
-    registration = next((reg for reg in db["registrations"] if reg["user_id"] == user_id and reg["status"] == "accepted"), None)
+    registration = next((reg for reg in db["registrations"] if reg["user_id"] == user_id and reg.get("status") == "accepted"), None)
     if registration and update.message.photo:
         receipt_file_id = update.message.photo[-1].file_id
         registration["receipt"] = receipt_file_id
@@ -961,12 +1030,15 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"**معرف المستخدم:** `{registration['user_id']}`"
             )
             for admin_id in admin_ids_to_notify:
-                await context.bot.send_photo(
-                    chat_id=admin_id,
-                    photo=receipt_file_id,
-                    caption=caption,
-                    parse_mode='Markdown'
-                )
+                try:
+                    await context.bot.send_photo(
+                        chat_id=admin_id,
+                        photo=receipt_file_id,
+                        caption=caption,
+                        parse_mode='Markdown'
+                    )
+                except (Unauthorized, BadRequest):
+                    logging.warning(f"Failed to send receipt notification to admin {admin_id}. User may have blocked the bot.")
             await update.message.reply_text("شكراً لك! تم إرسال إيصالك للمراجعة.")
     else:
         pass
@@ -995,6 +1067,24 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await show_courses(update, context)
     elif data.startswith("course_"):
         await show_course_details(update, context)
+    elif data.startswith("del_course_confirm_"):
+        await confirm_delete_course(update, context)
+    elif data.startswith("edit_select_"):
+        await edit_course_select_field(update, context)
+    elif data.startswith("toggle_status_"):
+        await toggle_course_status(update, context)
+    elif data.startswith("edit_field_"):
+        await edit_course_get_new_value(update, context)
+    elif data.startswith("edit_cat_"):
+        await update_course_with_new_cat(update, context)
+    elif data.startswith("move_course_"):
+        await move_course_select_category(update, context)
+    elif data.startswith("move_to_cat_"):
+        await move_course(update, context)
+    elif data.startswith("del_cat_confirm_"):
+        await confirm_delete_category(update, context)
+    elif data in ["delete_cat_only", "delete_cat_with_courses"]:
+        await execute_delete_category(update, context)
 
 
 # دالة لإلغاء المحادثة
@@ -1005,7 +1095,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 # دالة رئيسية لتشغيل البوت
 def main() -> None:
-    application = Application.builder().token(BOT_TOKEN).build()
+    # إضافة Handlers إلى الـ Application
+    
+    # أوامر رئيسية
+    application.add_handler(CommandHandler("start", start))
 
     # ConversationHandler لعملية تسجيل المستخدم
     user_reg_handler = ConversationHandler(
@@ -1048,11 +1141,11 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    # ConversationHandler لإرسال رسالة جماعية
+    # ConversationHandler لإرسال رسالة جماعية (تم تحديثه ليدعم الصور)
     admin_broadcast_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(broadcast_start, pattern="^dev_broadcast$")],
         states={
-            GET_BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, send_broadcast)],
+            GET_BROADCAST_MESSAGE: [MessageHandler(filters.TEXT | filters.PHOTO & ~filters.COMMAND, send_broadcast)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -1074,8 +1167,10 @@ def main() -> None:
         entry_points=[CallbackQueryHandler(edit_course_start, pattern="^dev_edit_course$")],
         states={
             EDIT_COURSE_SELECT_COURSE: [CallbackQueryHandler(edit_course_select_field, pattern=r"^edit_select_\d+$")],
-            EDIT_COURSE_SELECT_FIELD: [CallbackQueryHandler(edit_course_get_new_value, pattern=r"^edit_field_"),
-                                       CallbackQueryHandler(toggle_course_status, pattern=r"^toggle_status_\d+$")],
+            EDIT_COURSE_SELECT_FIELD: [
+                CallbackQueryHandler(edit_course_get_new_value, pattern=r"^edit_field_"),
+                CallbackQueryHandler(toggle_course_status, pattern=r"^toggle_status_\d+$")
+            ],
             EDIT_COURSE_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, update_course_with_new_value)],
             EDIT_COURSE_CAT: [CallbackQueryHandler(update_course_with_new_cat, pattern=r"^edit_cat_")],
         },
@@ -1091,7 +1186,7 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
-    # ConversationHandler لنقل دورة (جديد)
+    # ConversationHandler لنقل دورة
     admin_move_course_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(move_course_start, pattern="^dev_move_course$")],
         states={
@@ -1114,7 +1209,7 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)]
     )
 
-    # إضافة Handlers
+    # إضافة Handlers إلى الـ application
     application.add_handler(CommandHandler("start", start))
     application.add_handler(user_reg_handler)
     application.add_handler(admin_msg_handler)
@@ -1123,20 +1218,15 @@ def main() -> None:
     application.add_handler(admin_add_course_handler)
     application.add_handler(admin_edit_course_handler)
     application.add_handler(admin_delete_course_handler)
-    application.add_handler(admin_move_course_handler) # إضافة الـ Handler الجديد هنا
+    application.add_handler(admin_move_course_handler)
     application.add_handler(admin_category_handler)
     application.add_handler(CallbackQueryHandler(handle_callback_query))
     application.add_handler(MessageHandler(filters.PHOTO, handle_receipt))
     
-    # تشغيل البوت
-    print("البوت يعمل...")
-    application.run_polling()
+    # تشغيل Flask لتلقي Webhook (للنشر على سيرفر)
+    # لا تقم بتشغيل هذا إذا كنت ستستخدم polling
+    print("البوت يعمل، ينتظر تحديثات Webhook...")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-

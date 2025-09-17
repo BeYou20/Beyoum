@@ -1,4 +1,4 @@
-import os
+Import os
 import logging
 import json
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
@@ -19,7 +19,10 @@ logging.basicConfig(
 )
 
 # تعيين رمز البوت الخاص بك (Bot Token) هنا
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = "7342568984:AAGmOCkNc7SljYdwLuKdRjxRctRZZccsSck"
+
+# إضافة ID المطور الرئيسي هنا
+DEV_ID = 873158772
 
 # اسم ملف قاعدة البيانات
 DB_FILE = "db.json"
@@ -52,22 +55,32 @@ DB_FILE = "db.json"
     ADD_CATEGORY_NAME,
     DELETE_CATEGORY_CONFIRM,
     DELETE_COURSE_CONFIRM,
-    EDIT_COURSE_CAT
-) = range(7, 23)
+    EDIT_COURSE_CAT,
+    MOVE_COURSE_SELECT_COURSE, # حالة جديدة لنقل الدورة
+    MOVE_COURSE_SELECT_CAT, # حالة جديدة لاختيار التصنيف الجديد
+) = range(7, 25) # تم تعديل مدى الأرقام ليشمل الحالات الجديدة
 
 # دالة لقراءة البيانات من ملف JSON
 def load_db():
     try:
         with open(DB_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {
-            "users": [],
-            "admins": [],
+        # إنشاء بنية فارغة إذا لم يكن الملف موجودًا
+        data = {
+            "users": [873158772],
+            "admins": [873158772],
             "categories": [],
             "courses": [],
             "registrations": []
         }
+    
+    # ضمان وجود الـ DEV_ID دائمًا في قائمة المديرين
+    if DEV_ID not in data["admins"]:
+        data["admins"].append(DEV_ID)
+        save_db(data)
+        
+    return data
 
 # دالة لحفظ البيانات في ملف JSON
 def save_db(data):
@@ -106,19 +119,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db["users"].append(user_id)
         save_db(db)
         
-        admin_id = db["admins"][0] if db["admins"] else None
-        if admin_id:
+        # لا ترسل إشعار الدخول إلى المستخدم نفسه إذا كان مديرًا
+        admin_ids_to_notify = [admin_id for admin_id in db["admins"] if admin_id != user_id]
+        if admin_ids_to_notify:
             message_to_admin = (
                 f"**🔔 مستخدم جديد دخل البوت!**\n\n"
                 f"**الاسم:** {user.first_name} {user.last_name or ''}\n"
                 f"**المعرف (@):** {user.username or 'لا يوجد'}\n"
                 f"**معرف المستخدم (ID):** `{user_id}`"
             )
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=message_to_admin,
-                parse_mode='Markdown'
-            )
+            for admin_id in admin_ids_to_notify:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=message_to_admin,
+                    parse_mode='Markdown'
+                )
     
     await update.message.reply_text("أهلاً بك في بوت الدورات التدريبية!")
     await show_main_menu(update, context)
@@ -196,7 +211,7 @@ async def show_course_details(update: Update, context: ContextTypes.DEFAULT_TYPE
     message_text = (
         f"**{course['name']}**\n\n"
         f"**الوصف:** {course['description']}\n"
-        f"**السعر:** {course['price']} دولار أمريكي\n"
+        f"**السعر:** {course['price']} ريال يمني\n"
         f"**الحالة:** {'✅ متاحة للتسجيل' if course['active'] else '❌ غير متاحة حالياً'}"
     )
     
@@ -305,8 +320,8 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         reply_markup=ReplyKeyboardRemove()
     )
     
-    admin_id = db["admins"][0] if db["admins"] else None
-    if admin_id:
+    admin_ids = db["admins"]
+    if admin_ids:
         course = next((c for c in db["courses"] if c["id"] == registration_data['course_id']), None)
         course_name = course['name'] if course else 'دورة غير معروفة'
         
@@ -326,12 +341,13 @@ async def get_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         admin_keyboard = [[InlineKeyboardButton("✅ قبول", callback_data=f"accept_{registration_data['user_id']}_{registration_data['course_id']}"),
                            InlineKeyboardButton("❌ رفض", callback_data=f"reject_{registration_data['user_id']}_{registration_data['course_id']}")]]
         
-        await context.bot.send_message(
-            chat_id=admin_id,
-            text=message_to_admin,
-            reply_markup=InlineKeyboardMarkup(admin_keyboard),
-            parse_mode='Markdown'
-        )
+        for admin_id in admin_ids:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=message_to_admin,
+                reply_markup=InlineKeyboardMarkup(admin_keyboard),
+                parse_mode='Markdown'
+            )
         
     return ConversationHandler.END
 
@@ -432,17 +448,23 @@ async def remove_admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     db = load_db()
-    if not db["admins"]:
+    # لا يمكن إزالة المطور الأساسي
+    admins_to_remove = [admin for admin in db["admins"] if admin != DEV_ID]
+    if not admins_to_remove:
         await query.edit_message_text("لا يوجد مشرفون لإزالتهم.")
         return ConversationHandler.END
-    await query.edit_message_text("أرسل معرف المستخدم (User ID) الذي تريد إزالته من المشرفين:")
+        
+    admin_list = "\n".join([str(a) for a in admins_to_remove])
+    await query.edit_message_text(f"أرسل معرف المستخدم (User ID) الذي تريد إزالته من المشرفين:\n\nالمشرفون الحاليون:\n{admin_list}")
     return GET_ADMIN_ID_TO_REMOVE
 
 async def remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         admin_id_to_remove = int(update.message.text)
         db = load_db()
-        if admin_id_to_remove in db["admins"]:
+        if admin_id_to_remove == DEV_ID:
+            await update.message.reply_text("لا يمكنك إزالة المطور الأساسي.", reply_markup=ReplyKeyboardRemove())
+        elif admin_id_to_remove in db["admins"]:
             db["admins"].remove(admin_id_to_remove)
             save_db(db)
             await update.message.reply_text(f"تم إزالة المستخدم {admin_id_to_remove} من المشرفين.", reply_markup=ReplyKeyboardRemove())
@@ -494,6 +516,7 @@ async def show_manage_courses_menu(update: Update, context: ContextTypes.DEFAULT
     keyboard = [
         [InlineKeyboardButton("➕ إضافة دورة جديدة", callback_data="dev_add_course")],
         [InlineKeyboardButton("✏️ تعديل دورة", callback_data="dev_edit_course")],
+        [InlineKeyboardButton("➡️ نقل دورة", callback_data="dev_move_course")], # زر جديد لنقل الدورة
         [InlineKeyboardButton("🗑️ حذف دورة", callback_data="dev_delete_course")],
         [InlineKeyboardButton("⬅️ رجوع", callback_data="dev_panel")]
     ]
@@ -689,6 +712,60 @@ async def toggle_course_status(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_manage_courses_menu(update, context)
     return ConversationHandler.END
 
+# دوال جديدة لنقل الدورة
+async def move_course_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    db = load_db()
+    if not db["courses"]:
+        await query.edit_message_text("لا توجد دورات لنقلها.")
+        return ConversationHandler.END
+    
+    keyboard = []
+    for c in db["courses"]:
+        keyboard.append([InlineKeyboardButton(f"{c['name']} (ID: {c['id']})", callback_data=f"move_course_{c['id']}")])
+    keyboard.append([InlineKeyboardButton("⬅️ إلغاء", callback_data="dev_courses")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text("اختر الدورة التي تريد نقلها:", reply_markup=reply_markup)
+    return MOVE_COURSE_SELECT_COURSE
+
+async def move_course_select_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    course_id = int(query.data.split("move_course_")[1])
+    context.user_data["move_course_id"] = course_id
+    
+    db = load_db()
+    categories = db["categories"]
+    
+    if not categories:
+        await query.edit_message_text("لا توجد تصنيفات لنقل الدورة إليها.")
+        return ConversationHandler.END
+
+    keyboard = [[InlineKeyboardButton(cat, callback_data=f"move_to_cat_{cat}")] for cat in categories]
+    keyboard.append([InlineKeyboardButton("⬅️ إلغاء", callback_data="dev_courses")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text("اختر التصنيف الجديد للدورة:", reply_markup=reply_markup)
+    return MOVE_COURSE_SELECT_CAT
+
+async def move_course(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    new_category = query.data.split("move_to_cat_")[1]
+    course_id = context.user_data.pop("move_course_id")
+    
+    db = load_db()
+    for c in db["courses"]:
+        if c["id"] == course_id:
+            c["category"] = new_category
+            break
+            
+    save_db(db)
+    await query.edit_message_text("✅ تم نقل الدورة بنجاح.")
+    await show_manage_courses_menu(update, context)
+    return ConversationHandler.END
 
 # دوال إدارة التصنيفات
 async def show_manage_categories_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -854,8 +931,9 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         receipt_file_id = update.message.photo[-1].file_id
         registration["receipt"] = receipt_file_id
         save_db(db)
-        admin_id = db["admins"][0] if db["admins"] else None
-        if admin_id:
+        
+        admin_ids_to_notify = db["admins"]
+        if admin_ids_to_notify:
             course = next((c for c in db["courses"] if c["id"] == registration['course_id']), None)
             caption = (
                 f"**🔔 تم استلام إيصال دفع جديد**\n\n"
@@ -863,12 +941,13 @@ async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"**الاسم:** {registration['name']}\n"
                 f"**معرف المستخدم:** `{registration['user_id']}`"
             )
-            await context.bot.send_photo(
-                chat_id=admin_id,
-                photo=receipt_file_id,
-                caption=caption,
-                parse_mode='Markdown'
-            )
+            for admin_id in admin_ids_to_notify:
+                await context.bot.send_photo(
+                    chat_id=admin_id,
+                    photo=receipt_file_id,
+                    caption=caption,
+                    parse_mode='Markdown'
+                )
             await update.message.reply_text("شكراً لك! تم إرسال إيصالك للمراجعة.")
     else:
         pass
@@ -992,6 +1071,16 @@ def main() -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+
+    # ConversationHandler لنقل دورة (جديد)
+    admin_move_course_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(move_course_start, pattern="^dev_move_course$")],
+        states={
+            MOVE_COURSE_SELECT_COURSE: [CallbackQueryHandler(move_course_select_category, pattern=r"^move_course_\d+$")],
+            MOVE_COURSE_SELECT_CAT: [CallbackQueryHandler(move_course, pattern=r"^move_to_cat_")]
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
     
     # ConversationHandler لإدارة التصنيفات
     admin_category_handler = ConversationHandler(
@@ -1015,6 +1104,7 @@ def main() -> None:
     application.add_handler(admin_add_course_handler)
     application.add_handler(admin_edit_course_handler)
     application.add_handler(admin_delete_course_handler)
+    application.add_handler(admin_move_course_handler) # إضافة الـ Handler الجديد هنا
     application.add_handler(admin_category_handler)
     application.add_handler(CallbackQueryHandler(handle_callback_query))
     application.add_handler(MessageHandler(filters.PHOTO, handle_receipt))
@@ -1025,4 +1115,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

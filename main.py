@@ -1,3 +1,4 @@
+import os
 import logging
 import json
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
@@ -18,7 +19,7 @@ logging.basicConfig(
 )
 
 # تعيين رمز البوت الخاص بك (Bot Token) هنا
-BOT_TOKEN = "7512497753:AAHr0jJp3XA0WC-Dyj1ujT-DomQXjVcITzs"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # اسم ملف قاعدة البيانات
 DB_FILE = "db.json"
@@ -1024,3 +1025,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

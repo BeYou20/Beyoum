@@ -39,7 +39,8 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-
+application = Application.builder().token(BOT_TOKEN).build()
+application.run_polling()
 # إضافة ID المطور الرئيسي هنا
 DEV_ID = 873158772
 
@@ -1134,6 +1135,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

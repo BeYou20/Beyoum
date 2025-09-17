@@ -2,6 +2,8 @@ import os
 import logging
 import json
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from flask import Flask
+from threading import Thread
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -20,6 +22,23 @@ logging.basicConfig(
 
 # تعيين رمز البوت الخاص بك (Bot Token) هنا
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+# إنشاء تطبيق Flask
+app = Flask('')
+
+# دالة الـ route الرئيسية
+@app.route('/')
+def home():
+    return "Bot is running"
+
+# دالة لتشغيل Flask في Thread منفصل
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+# دالة لتشغيل Flask
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
 
 # إضافة ID المطور الرئيسي هنا
 DEV_ID = 873158772
@@ -1115,6 +1134,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

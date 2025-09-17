@@ -4,7 +4,7 @@ import json
 from flask import Flask, request
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
-from telegram.error import Unauthorized, BadRequest
+from telegram import TelegramError
 
 # إعداد logging لتتبع الأخطاء
 logging.basicConfig(
@@ -1230,3 +1230,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
